@@ -6,27 +6,18 @@ import (
 	"io"
 	"log"
 	"net"
+	"net-cat/service"
 	"strings"
 	"sync"
 )
 
 const maxClients = 10
-const defaultPort = "8989"
 
-type Client struct {
-	Conn net.Conn
-	Name string
-}
-
-type Server struct {
-	Clients map[net.Conn]*Client
-	Mutex   sync.Mutex
-}
-
-// Start initializes and runs the TCP server
+// Start initializes the TCP listener and accepts clients forever.
 func Start(port string) error {
+	// If no CLI port is provided, use the shared model default.
 	if port == "" {
-		port = defaultPort
+		port = service.DefaultPort
 	}
 
 	listener, err := net.Listen("tcp", ":"+port)
@@ -37,8 +28,10 @@ func Start(port string) error {
 
 	fmt.Println("Listening on the port :" + port)
 
-	server := &Server{
-		Clients: make(map[net.Conn]*Client),
+	server := &service.Server{
+		// Active clients keyed by connection object.
+		Client: make(map[net.Conn]*service.Client),
+		Mutex:  sync.Mutex{},
 	}
 
 	for {
@@ -48,14 +41,16 @@ func Start(port string) error {
 			continue
 		}
 
-		go server.handleConnection(conn)
+		// Each client gets its own goroutine so connections are concurrent.
+		go handleConnection(server, conn)
 	}
 }
 
-func (s *Server) handleConnection(conn net.Conn) {
-	// Enforce max clients
+// handleConnection manages one client from connect to disconnect.
+func handleConnection(s *service.Server, conn net.Conn) {
+	// Enforce max clients (best-effort under concurrent connects).
 	s.Mutex.Lock()
-	if len(s.Clients) >= maxClients {
+	if len(s.Client) >= maxClients {
 		s.Mutex.Unlock()
 		conn.Write([]byte("Server full. Maximum 10 clients allowed.\n"))
 		conn.Close()
@@ -71,17 +66,18 @@ func (s *Server) handleConnection(conn net.Conn) {
 		return
 	}
 
-	client := &Client{
+	client := &service.Client{
 		Conn: conn,
 		Name: name,
 	}
 
-	s.registerClient(client)
-	defer s.removeClient(client)
+	// Register now; always remove on any later return path.
+	registerClient(s, client)
+	defer removeClient(s, client)
 
 	log.Printf("Client connected: %s\n", client.Name)
 
-	// Keep connection alive
+	// Keep connection alive by reading until the peer disconnects.
 	buffer := make([]byte, 1)
 	for {
 		_, err := conn.Read(buffer)
@@ -96,20 +92,23 @@ func (s *Server) handleConnection(conn net.Conn) {
 	}
 }
 
-func (s *Server) registerClient(client *Client) {
+// registerClient stores a connected client in shared state.
+func registerClient(s *service.Server, client *service.Client) {
 	s.Mutex.Lock()
 	defer s.Mutex.Unlock()
-	s.Clients[client.Conn] = client
+	s.Client[client.Conn] = client
 }
 
-func (s *Server) removeClient(client *Client) {
+// removeClient deletes a client from shared state and closes its socket.
+func removeClient(s *service.Server, client *service.Client) {
 	s.Mutex.Lock()
 	defer s.Mutex.Unlock()
 
-	delete(s.Clients, client.Conn)
+	delete(s.Client, client.Conn)
 	client.Conn.Close()
 }
 
+// sendWelcome writes the banner and prompts the user for their name.
 func sendWelcome(conn net.Conn) {
 	welcome := "Welcome to TCP-Chat!\n" +
 		"         _nnnn_\n" +
@@ -133,6 +132,7 @@ func sendWelcome(conn net.Conn) {
 	conn.Write([]byte(welcome))
 }
 
+// askName reads newline-terminated input and rejects empty names.
 func askName(conn net.Conn) (string, error) {
 	reader := bufio.NewReader(conn)
 
