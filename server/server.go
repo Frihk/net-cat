@@ -30,7 +30,7 @@ func Start(port string) error {
 
 	server := &service.Server{
 		// Active clients keyed by connection object.
-		Client: make(map[net.Conn]*service.Client),
+		Clients: make(map[net.Conn]*service.Client),
 		Mutex:  sync.Mutex{},
 	}
 
@@ -50,7 +50,7 @@ func Start(port string) error {
 func handleConnection(s *service.Server, conn net.Conn) {
 	// Enforce max clients (best-effort under concurrent connects).
 	s.Mutex.Lock()
-	if len(s.Client) >= maxClients {
+	if len(s.Clients) >= maxClients {
 		s.Mutex.Unlock()
 		conn.Write([]byte("Server full. Maximum 10 clients allowed.\n"))
 		conn.Close()
@@ -96,7 +96,7 @@ func handleConnection(s *service.Server, conn net.Conn) {
 func registerClient(s *service.Server, client *service.Client) {
 	s.Mutex.Lock()
 	defer s.Mutex.Unlock()
-	s.Client[client.Conn] = client
+	s.Clients[client.Conn] = client
 }
 
 // removeClient deletes a client from shared state and closes its socket.
@@ -104,7 +104,7 @@ func removeClient(s *service.Server, client *service.Client) {
 	s.Mutex.Lock()
 	defer s.Mutex.Unlock()
 
-	delete(s.Client, client.Conn)
+	delete(s.Clients, client.Conn)
 	client.Conn.Close()
 }
 
