@@ -16,7 +16,8 @@ The main program (`main.go`) starts the server and waits for incoming connection
 - Includes an optional terminal UI (TUI) client.
 - Tests cover the main behaviors.
 - Clear join, message, and leave flow (explained below).
-- Group chat selection and name‑change commands are **not** implemented yet (see the extension section).
+- Group chat support with `--join <name of the group>`.
+- Name change support with `--change-name <new name>` or `--change -name <new name>`.
 
 **Requirements**
 - Go `1.24.3` or newer (as listed in `go.mod`).
@@ -51,12 +52,12 @@ telnet localhost 8989
 
 Use the built‑in TUI client (connect to a running server):
 ```bash
-go run ./cmd/tui 8989
+go run -tags tui ./cmd/tui 8989
 ```
 
 Use the TUI client and start a local server automatically:
 ```bash
-go run ./cmd/tui --with-server
+go run -tags tui ./cmd/tui --with-server
 ```
 
 Quit the TUI with `Ctrl+C` or `Ctrl+Q`.
@@ -103,16 +104,17 @@ Alice receives:
 
 Note: the server does **not** echo your own message back to you. If you use `nc` or `telnet`, you will not see your own line after pressing Enter. The TUI client prints your own messages locally so you can see them.
 
-**Planned Client Commands (Not Implemented Yet)**
-These commands are **not** available in the current code. They are listed here because you asked to document them. If you want them to work, you will need to implement them in the client and server.
+**Client Commands (Type These in the Chat Input)**
+These are not CLI flags. You type them as normal chat messages and the server interprets them.
 
-Join another group chat:
+Join another group chat (creates the group if it does not exist):
 ```bash
 --join <name of the group>
 ```
 
 Change your name:
 ```bash
+--change-name <new name>
 --change -name <new name>
 ```
 
@@ -146,17 +148,17 @@ This section walks through the full flow, from starting the program to clients j
 - `HandleClient` sends the ASCII banner (`utils.Banner`) to the client.
 - The client types a name and presses Enter.
 - The name is trimmed and stored in the `Client` struct.
-- The client is sent into the `server.Join` channel.
-- The server’s `Broadcasts` loop receives the join event, then:
-  - Adds the client to the `Clients` map.
-  - Sends the chat history to the new client.
-  - Broadcasts a system message like `alice has joined our chat.` to everyone else.
+- The client is placed into the default group named `lobby`.
+- The group’s `Broadcasts` loop receives the join event, then:
+- Adds the client to the group’s `Clients` map.
+- Sends the group chat history to the new client.
+- Broadcasts a system message like `alice has joined our chat.` to everyone else in that group.
 
 **5. Client sends a message**
 - Each client has a `ReadInput` loop running in a goroutine.
 - It scans one line at a time from the TCP connection.
 - Empty or whitespace‑only messages are ignored.
-- Each valid message is turned into a `Message` object and sent to `server.Broadcast`.
+- Each valid message is turned into a `Message` object and sent to the current group’s `Broadcast` channel.
 - The server formats it as:
   ```
   [YYYY-MM-DD HH:MM:SS][name]: message
@@ -172,13 +174,10 @@ This section walks through the full flow, from starting the program to clients j
 - The client is removed from the `Clients` map.
 
 **7. Changing a name**
-- The current code does **not** support changing names after the first prompt.
-- The name is read once in `cmd.HandleClient` and then stored in `Client.Name`.
-- If you want `/nick newname` or similar behavior, you would need to do these steps:
-1. Detect that command in `(*Client).ReadInput`.
-2. Update the `Client.Name` safely (with a lock).
-3. Update the `Clients` map key so it matches the new name.
-4. Broadcast a system message like `oldname is now known as newname`.
+- The client can change names by typing `--change-name <new name>` or `--change -name <new name>`.
+- The server checks if the new name is already used in the current group.
+- If the name is free, the server updates the group’s `Clients` map and the `Client.Name`.
+- A system message is broadcast to the current group to announce the change.
 
 **Project Structure and Key Functions**
 
@@ -229,8 +228,8 @@ Here are common changes you can make:
 - Show your own messages on the server side: change `broadcastToOthers` to also send to the sender.
 - Save chat history to disk: update `addToHistory` and load history on startup.
 - Add commands (like `/nick` or `/list`): parse messages in `ReadInput` before broadcasting.
-- Add group chats and `--join <group>`: add a group concept to `Server`, track group membership, and route broadcasts by group.
-- Add `--change -name <new name>`: implement a rename command that updates `Client.Name` and the `Clients` map safely.
+- Add private groups or passwords: check a join request before allowing entry.
+- Improve command parsing: split by fields and support quoted group names.
 - Add TLS for secure connections: replace `net.Listen` and `net.Dial` with the TLS versions in `crypto/tls`.
 
 **Running Tests**

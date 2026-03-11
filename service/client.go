@@ -28,6 +28,7 @@ func (c *Client) ReadInput(s *Server) {
 		}
 
 		const changeCmd = "--change-name"
+		const changeCmdAlt = "--change -name"
 		const joinCmd = "--join"
 		if len(msg) >= len(joinCmd) && strings.EqualFold(msg[:len(joinCmd)], joinCmd) {
 			groupName := strings.TrimSpace(msg[len(joinCmd):])
@@ -63,7 +64,35 @@ func (c *Client) ReadInput(s *Server) {
 		if len(msg) >= len(changeCmd) && strings.EqualFold(msg[:len(changeCmd)], changeCmd) {
 			newName := strings.TrimSpace(msg[len(changeCmd):])
 			if newName == "" {
-				c.Messages <- "Usage: --change-name <name>"
+				c.Messages <- "Usage: --change-name <name> or --change -name <name>"
+				continue
+			}
+
+			group := c.Group
+			group.Mutex.Lock()
+			if _, exists := group.Clients[newName]; exists {
+				group.Mutex.Unlock()
+				c.Messages <- "Name already taken. Choose a different name."
+				continue
+			}
+
+			oldName := c.Name
+			delete(group.Clients, oldName)
+			group.Clients[newName] = c
+			c.Name = newName
+			group.Mutex.Unlock()
+
+			systemMsg := formatSystemMessage(fmt.Sprintf("%s changed name to %s.", oldName, newName))
+			group.addToHistory(systemMsg)
+			group.broadcastToOthers(systemMsg, c)
+			c.Messages <- "Name updated."
+			continue
+		}
+
+		if len(msg) >= len(changeCmdAlt) && strings.EqualFold(msg[:len(changeCmdAlt)], changeCmdAlt) {
+			newName := strings.TrimSpace(msg[len(changeCmdAlt):])
+			if newName == "" {
+				c.Messages <- "Usage: --change-name <name> or --change -name <name>"
 				continue
 			}
 

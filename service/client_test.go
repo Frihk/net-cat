@@ -46,13 +46,17 @@ func TestReadInputPublishesMessagesAndLeavesOnDisconnect(t *testing.T) {
 	clientConn, peerConn := net.Pipe()
 	defer peerConn.Close()
 
-	s := NewServer(10)
-	group := s.GetOrCreateGroup("lobby")
+	group := &Group{
+		Name:      "lobby",
+		Clients:   make(map[string]*Client),
+		Broadcast: make(chan Message, 2),
+		Leave:     make(chan *Client, 1),
+	}
 	c := &Client{Conn: clientConn, Name: "alice", Group: group}
 
 	done := make(chan struct{})
 	go func() {
-		c.ReadInput(s)
+		c.ReadInput(&Server{})
 		close(done)
 	}()
 
